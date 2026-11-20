@@ -1,0 +1,21 @@
+# Cache et fichiers compilés Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Environnements virtuels
+venv/
+.venv/
+env/
+
+# Fichiers temporaires et tests
+.pytest_cache/
+.coverage
+test_scene_temp.json
+
+# Éditeurs et OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
