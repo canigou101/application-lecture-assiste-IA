@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org",
+  "title": "SceneNarrativeState",
+  "description": "État compressé d'une scène pour le moteur narratif assisté par IA",
+  "type": "object",
+  "required": ["scene_id", "lieu", "niveau_danger", "personnages_presents", "resume_telegraphique"],
+  "properties": {
+    "scene_id": {
+      "type": "string",
+      "description": "Identifiant unique de la scène (ex: scene_01)"
+    },
+    "lieu": {
+      "type": "string",
+      "description": "Emplacement actuel (ex: Salle de bal royale)"
+    },
+    "niveau_danger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Empêche l'apparition incohérente d'un boss dans un lieu facile"
+    },
+    "resume_telegraphique": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Historique ultra-concis des événements communs aux personnages présents"
+    },
+    "personnages_presents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "nom", "est_joueur", "caractere", "traits_physiques", "stats", "relations"],
+        "properties": {
+          "id": { "type": "string" },
+          "nom": { "type": "string" },
+          "est_joueur": { "type": "boolean" },
+          "caractere": {
+            "type": "string",
+            "enum": ["gentil", "neutre", "mechant"]
+          },
+          "traits_physiques": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Ex: ['borgne_droit', 'boiteux']"
+          },
+          "objectif_cache": {
+            "type": ["string", "null"],
+            "description": "Objectif secret pour les PNJ créés dynamiquement"
+          },
+          "stats": {
+            "type": "object",
+            "required": ["force", "dext", "charisme", "force_mentale", "discretion", "chance"],
+            "properties": {
+              "force": { "type": "integer" },
+              "dext": { "type": "integer" },
+              "charisme": { "type": "integer" },
+              "force_mentale": { "type": "integer" },
+              "discretion": { "type": "integer" },
+              "chance": { "type": "integer" },
+              "stat_arme": { "type": "integer", "default": 0 },
+              "stat_cosmetics": { "type": "integer", "default": 0 },
+              "stat_magie_potion": { "type": "integer", "default": 0 }
+            }
+          },
+          "relations": {
+            "type": "object",
+            "required": ["allies", "ennemis"],
+            "properties": {
+              "allies": { "type": "array", "items": { "type": "string" } },
+              "ennemis": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
