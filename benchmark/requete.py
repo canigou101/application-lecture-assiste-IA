@@ -12,7 +12,8 @@ MODELS = [
     "qwen2.5:1.5b",
     "all-minilm:22m",
     "all-minilm:33m",
-    "tinyllama:1.1b"
+    "tinyllama:1.1b",
+    "llama2.5:3b"
 ]
 
 def benchmark_model(model_name, prompt):
