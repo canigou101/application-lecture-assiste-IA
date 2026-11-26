@@ -1,13 +1,50 @@
-import urllib.request
 import json
-import time
+import os
 from src.models import Scene, Personnage, Stats, Relations
 from src.rules_engine import MoteurReglesJDR
+from src.llm import ILLMProvider, OllamaProvider, OpenRouterProvider
 
-# Configuration de votre conteneur Ollama sur le Jetson Nano (port 2020 d'après votre docker ps)
-OLLAMA_URL = "http://192.168.1.110:2020/api/generate"  # Remplacez 'localhost' par l'IP de votre Jetson si lancé depuis votre PC
-MODELE_OLLAMA = "qwen2.5:1.5b"
-TAILLE_CONTEXTE = 2048  # Paramètre num_ctx demandé par l'évaluateur
+TAILLE_CONTEXTE = 2048  # Fenêtre de contexte maîtrisée (num_ctx)
+
+
+def charger_secrets() -> dict:
+    """Charge la configuration locale (clé OpenRouter, IP Jetson) depuis secrets.json."""
+    if os.path.exists("secrets.json"):
+        with open("secrets.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def choisir_fournisseur_ia() -> ILLMProvider:
+    """
+    Permet à l'utilisateur de basculer entre confidentialité locale/LAN et API distante.
+    Respecte le principe de Substitution de Liskov (LSP) via ILLMProvider.
+    """
+    secrets = charger_secrets()
+    print("\n" + "-" * 65)
+    print("   PARAMÈTRE DE CONFIDENTIALITÉ & FOURNISSEUR D'INFÉRENCE IA")
+    print("-" * 65)
+    print("  [1] Ollama Local (PC : http://localhost:11434) — 100% Privé")
+    print("  [2] Ollama LAN   (Jetson Nano : port 2020)     — 100% Privé")
+    print("  [3] OpenRouter   (API Cloud)                   — Haute vitesse")
+    
+    choix = input("\nSélectionnez le moteur IA [1/2/3] (Entrée pour 1) : ").strip() or "1"
+
+    if choix == "2":
+        ip_jetson = secrets.get("jetson_ip") or input("IP statique du Jetson Nano (ex: 192.168.1.45) : ").strip()
+        modele = input("Modèle sur Jetson (Entrée pour 'qwen2.5:1.5b') : ").strip() or "qwen2.5:1.5b"
+        return OllamaProvider(base_url=f"http://{ip_jetson}:2020", modele=modele)
+
+    elif choix == "3":
+        api_key = secrets.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            api_key = input("Entrez votre clé API OpenRouter (sk-or-...) : ").strip()
+        modele = input("Modèle OpenRouter (Entrée pour 'qwen/qwen-2.5-7b-instruct:free') : ").strip() or "qwen/qwen-2.5-7b-instruct:free"
+        return OpenRouterProvider(api_key=api_key, modele=modele)
+
+    # Par défaut : Ollama sur la machine locale
+    modele_local = input("Modèle Ollama local (Entrée pour 'qwen2.5:1.5b') : ").strip() or "qwen2.5:1.5b"
+    return OllamaProvider(base_url="http://localhost:11434", modele=modele_local)
 
 
 def initialiser_scenario() -> dict[str, Scene]:
@@ -41,7 +78,6 @@ def initialiser_scenario() -> dict[str, Scene]:
         relations=Relations(allies=[], ennemis=["pnj_roi"])
     )
 
-    # Scène 1 : Le bal
     scene_1 = Scene(
         scene_id="scene_01_bal",
         lieu="Salle de bal royale",
@@ -50,7 +86,6 @@ def initialiser_scenario() -> dict[str, Scene]:
         personnages_presents=[joueur, roi, assassin]
     )
 
-    # Scène 2 : Les cachots (le roi n'est plus dans le contexte pour économiser des tokens)
     scene_2 = Scene(
         scene_id="scene_02_cachots",
         lieu="Cachots du château",
@@ -62,59 +97,17 @@ def initialiser_scenario() -> dict[str, Scene]:
     return {"1": scene_1, "2": scene_2}
 
 
-def interroger_ollama(prompt: str) -> dict:
-    """Interroge l'API Ollama et extrait les métriques exactes (tokens/s, contexte)."""
-    payload = {
-        "model": MODELE_OLLAMA,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "num_ctx": TAILLE_CONTEXTE,
-            "temperature": 0.7
-        }
-    }
-
-    try:
-        req = urllib.request.Request(
-            OLLAMA_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=60) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            eval_count = data.get("eval_count", 0)
-            # eval_duration est en nanosecondes dans l'API Ollama
-            eval_duration_sec = data.get("eval_duration", 1) / 1e9
-            tokens_par_sec = eval_count / eval_duration_sec if eval_duration_sec > 0 else 0
-
-            return {
-                "texte": data.get("response", "").strip(),
-                "tokens_generes": eval_count,
-                "tokens_par_sec": round(tokens_par_sec, 2),
-                "duree_sec": round(eval_duration_sec, 2),
-                "mode": "OLLAMA RÉEL"
-            }
-    except Exception:
-        # Mode secours si le Jetson Nano n'est pas allumé lors du test sur PC
-        time.sleep(0.4)
-        sim_text = "Dans la pénombre, la lame brille brièvement avant que l'issue du duel ne scelle le sort de la salle."
-        return {
-            "texte": sim_text,
-            "tokens_generes": 24,
-            "tokens_par_sec": 3.45,
-            "duree_sec": 6.95,
-            "mode": "SIMULATION (Jetson hors-ligne)"
-        }
-
-
 def lancer_cli():
     moteur = MoteurReglesJDR()
     scenes = initialiser_scenario()
     scene_courante = scenes["1"]
 
     print("=" * 65)
-    print("   MOTEUR NARRATIF JDR - PROTOTYPE CLI & DÉCOUPAGE PAR SCÈNES")
+    print("   MOTEUR NARRATIF JDR — CLI SOLID (LOCAL / JETSON / OPENROUTER)")
     print("=" * 65)
+
+    # Choix initial du fournisseur IA
+    provider: ILLMProvider = choisir_fournisseur_ia()
 
     while True:
         print(f"\n[SCÈNE ACTIVE : {scene_courante.scene_id.upper()}]")
@@ -124,10 +117,11 @@ def lancer_cli():
         print(contexte_compresse)
         print("-" * 65)
 
-        print("\nActions rapides disponibles :")
+        print("\nActions disponibles :")
         print("  [1] Scruter la pièce (Action neutre)")
         print("  [2] Attaquer Vesper sur son côté droit (Action avec conséquence)")
-        print("  [3] Changer de scène -> Aller aux Cachots (Démonstration découpage)")
+        print("  [3] Changer de scène -> Aller aux Cachots (Découpage contexte)")
+        print("  [4] Changer de fournisseur IA (Switch Confidentialité / API)")
         print("  [q] Quitter")
 
         choix = input("\nVotre choix (ou tapez une action libre) : ").strip()
@@ -139,6 +133,11 @@ def lancer_cli():
         elif choix == "3":
             scene_courante = scenes["2"]
             print("\n>>> TRANSITION DE SCÈNE : Le Roi Aldric est retiré du contexte JSON.")
+            continue
+
+        elif choix == "4":
+            provider = choisir_fournisseur_ia()
+            print("\n>>> FOURNISSEUR IA MIS À JOUR (État de la scène conservé).")
             continue
 
         elif choix == "1":
@@ -165,7 +164,7 @@ def lancer_cli():
             )
             print(f"[RÈGLES JDR]     {verdict_regles}")
 
-        # 3. Appel au LLM avec prompt télégraphique
+        # 3. Appel au fournisseur IA actif (Ollama PC, Jetson LAN ou OpenRouter)
         prompt_final = (
             f"{contexte_compresse}\n"
             f"ACTION JOUEUR: {action_texte}\n"
@@ -173,12 +172,19 @@ def lancer_cli():
             f"Consigne: Décris la suite en 2 phrases maximum."
         )
 
-        print(f"\n[INFÉRENCE IA]   Modèle: {MODELE_OLLAMA} | Contexte max (num_ctx): {TAILLE_CONTEXTE} tokens...")
-        reponse_ia = interroger_ollama(prompt_final)
+        print(f"\n[INFÉRENCE IA]   Envoi vers le fournisseur actif (num_ctx: {TAILLE_CONTEXTE})...")
+        try:
+            reponse_ia = provider.generer_narration(prompt_final, num_ctx=TAILLE_CONTEXTE)
+            print(
+                f"[MÉTRIQUES]      Source: {reponse_ia['source']} | "
+                f"Vitesse: {reponse_ia['tokens_par_sec']} tokens/s "
+                f"({reponse_ia['tokens_generes']} tokens en {reponse_ia['duree_sec']}s)"
+            )
+            print(f"\n[NARRATEUR IA]   « {reponse_ia['texte']} »\n")
+        except Exception as err:
+            print(f"\n[ERREUR IA]      {err}")
+            print("                 Utilisez l'option [4] pour basculer sur un autre fournisseur.\n")
 
-        print(f"[MÉTRIQUES]      Source: {reponse_ia['mode']} | Vitesse: {reponse_ia['tokens_par_sec']} tokens/s "
-              f"({reponse_ia['tokens_generes']} tokens en {reponse_ia['duree_sec']}s)")
-        print(f"\n[NARRATEUR IA]   « {reponse_ia['texte']} »\n")
         print("=" * 65)
 
 
