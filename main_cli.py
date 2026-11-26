@@ -172,8 +172,8 @@ def lancer_cli():
             if action_texte.lower() == "/scene":
                 continue
 
-        # Analyse dynamique de l'action libre du joueur
-        joueur = next((p for p in scene_courante.personnages_presents if p.est_joueur), scene_courante.personnages_presents.pop(0))
+        # Récupération sans modifier la liste des personnages présents
+        joueur = next((p for p in scene_courante.personnages_presents if p.est_joueur), scene_courante.personnages_presents[0])
         analyse = moteur.analyser_et_resoudre_action_libre(
             action_texte=action_texte,
             joueur=joueur,
@@ -185,9 +185,10 @@ def lancer_cli():
 
         prompt_final = (
             f"{contexte_compresse}\n"
-            f"ACTION LIBRE DU JOUEUR ({joueur.nom}) : {action_texte}\n"
+            f"PROTAGONISTE INCARNÉ PAR LE JOUEUR : {joueur.nom}\n"
+            f"ACTION LIBRE DE {joueur.nom.upper()} : {action_texte}\n"
             f"VERDICT DU MOTEUR DE RÈGLES : {analyse['verdict']}\n"
-            f"Consigne : Raconte la suite de la scène en français en 2 phrases maximum en respectant strictement le verdict."
+            f"Consigne : Raconte ce que fait {joueur.nom} et la réaction de la scène en français, en 2 phrases maximum, en respectant strictement le verdict."
         )
 
         print(f"\n[INFÉRENCE IA]   Envoi vers le fournisseur actif (num_ctx: {TAILLE_CONTEXTE})...")

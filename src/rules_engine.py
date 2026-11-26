@@ -1,7 +1,9 @@
 import random
+import re
 from enum import Enum
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from src.models import Personnage
+
 
 class ResultatAction(Enum):
     ECHEC_CUISANT = "Échec cuisant"
@@ -9,14 +11,18 @@ class ResultatAction(Enum):
     REUSSITE_SIMPLE = "Réussite simple"
     FRANCHE_REUSSITE = "Franche réussite"
 
+
 class MoteurReglesJDR:
-    
+
     @staticmethod
     def est_action_avec_consequence(action_texte: str) -> bool:
         """
-        Tranche entre une action d'observation neutre et une action impactant l'intrigue.
+        Tranche entre une action d'observation/déplacement neutre et une action impactant l'intrigue.
         """
-        mots_cles_neutres = ["scrute", "regarde", "observe", "examine", "écoute", "inspecte"]
+        mots_cles_neutres = [
+            "scrute", "regarde", "observe", "examine", "écoute", "inspecte",
+            "balade", "promène", "marche", "déplace", "flâne", "contemple"
+        ]
         action_lower = action_texte.lower()
         for mot in mots_cles_neutres:
             if mot in action_lower:
@@ -50,9 +56,9 @@ class MoteurReglesJDR:
         return (allies_communs * 1) + (ennemis_chez_ses_allies * -1)
 
     @staticmethod
-    def evaluer_jet(score_total: float, difficulte: int = 20) -> ResultatAction:
-        """Détermine l'issue parmi les 4 paliers du JDR."""
-        if score_total <= 0:
+    def evaluer_jet(score_total: float, difficulte: int = 20, jet_de: Optional[int] = None) -> ResultatAction:
+        """Détermine l'issue parmi les 4 paliers du JDR (avec échec critique sur un 1 naturel)."""
+        if jet_de == 1 or score_total <= 0:
             return ResultatAction.ECHEC_CUISANT
         elif score_total < difficulte:
             return ResultatAction.SIMPLE_ECHEC
@@ -60,99 +66,6 @@ class MoteurReglesJDR:
             return ResultatAction.REUSSITE_SIMPLE
         else:
             return ResultatAction.FRANCHE_REUSSITE
-
-    def calculer_degats(
-        self, 
-        attaquant: Personnage, 
-        cible: Personnage, 
-        cote_attaque: str = "face",
-        malus: int = 0,
-        jet_de: Optional[int] = None
-    ) -> dict:
-        """
-        Formule : Dégâts = (force + statArme) * (chance + dext + malus)
-        Intègre la cohérence physique (ex: cible borgne du côté droit).
-        """
-        autorise, raison = self.verifier_autorisation_attaque(attaquant, cible)
-        if not autorise:
-            return {"autorise": False, "raison": raison, "degats": 0}
-
-        de = jet_de if jet_de is not None else random.randint(1, 20)
-        
-        # Bonus de cohérence si la cible a un angle mort
-        bonus_coherence = 0
-        if cote_attaque == "droite" and "borgne_droit" in cible.traits_physiques:
-            bonus_coherence = 2
-        elif cote_attaque == "gauche" and "borgne_gauche" in cible.traits_physiques:
-            bonus_coherence = 2
-
-        facteur_base = attaquant.stats.force + attaquant.stats.stat_arme + bonus_coherence
-        multiplicateur = attaquant.stats.chance + attaquant.stats.dext + malus
-        
-        degats_calcules = facteur_base * multiplicateur
-        score_jet = de + degats_calcules
-        resultat = self.evaluer_jet(score_jet, difficulte=25)
-
-        # Si le personnage est trop mauvais (multiplicateur négatif), il se blesse lui-même
-        auto_degats = abs(degats_calcules) if degats_calcules < 0 else 0
-
-        return {
-            "autorise": True,
-            "jet_de": de,
-            "degats": max(0, degats_calcules),
-            "auto_degats": auto_degats,
-            "resultat": resultat
-        }
-
-    def calculer_seduction(
-        self, 
-        initiateur: Personnage, 
-        cible: Personnage, 
-        malus: int = 0,
-        jet_de: Optional[int] = None
-    ) -> dict:
-        """
-        Formule : Séduction = (charisme + statsCosmetics) * (estMonEnnemi + chance + malus)
-        """
-        de = jet_de if jet_de is not None else random.randint(1, 20)
-        score_relation = self.calculer_est_mon_ennemi(initiateur, cible)
-        
-        score_seduction = (initiateur.stats.charisme + initiateur.stats.stat_cosmetics) * (
-            score_relation + initiateur.stats.chance + malus
-        )
-        resultat = self.evaluer_jet(de + score_seduction, difficulte=20)
-        return {"jet_de": de, "score": score_seduction, "resultat": resultat}
-
-    def calculer_vol(
-        self, 
-        voleur: Personnage, 
-        malus: int = 0,
-        jet_de: Optional[int] = None
-    ) -> dict:
-        """
-        Formule : Vol = (discrétion + dext) * (chance + malus)
-        """
-        de = jet_de if jet_de is not None else random.randint(1, 20)
-        score_vol = (voleur.stats.discretion + voleur.stats.dext) * (voleur.stats.chance + malus)
-        resultat = self.evaluer_jet(de + score_vol, difficulte=20)
-        return {"jet_de": de, "score": score_vol, "resultat": resultat}
-
-    def calculer_alteration_mentale(
-        self, 
-        lanceur: Personnage, 
-        chance1: int, 
-        chance2: int,
-        jet_de: Optional[int] = None
-    ) -> dict:
-        """
-        Formule : Altération = (force mentale + chance1) * (stats potion/sorts + chance2 + dext)
-        """
-        de = jet_de if jet_de is not None else random.randint(1, 20)
-        score_alt = (lanceur.stats.force_mentale + chance1) * (
-            lanceur.stats.stat_magie_potion + chance2 + lanceur.stats.dext
-        )
-        resultat = self.evaluer_jet(de + score_alt, difficulte=25)
-        return {"jet_de": de, "score": score_alt, "resultat": resultat}
     def calculer_degats(
         self,
         attaquant: Personnage,
@@ -182,14 +95,19 @@ class MoteurReglesJDR:
 
         degats_calcules = facteur_base * multiplicateur
         score_jet = de + degats_calcules
-        resultat = self.evaluer_jet(score_jet, difficulte=25)
+        resultat = self.evaluer_jet(score_jet, difficulte=25, jet_de=de)
+
+        if resultat == ResultatAction.ECHEC_CUISANT:
+            degats_finaux = 0
+        else:
+            degats_finaux = max(0, degats_calcules)
 
         auto_degats = abs(degats_calcules) if degats_calcules < 0 else 0
 
         return {
             "autorise": True,
             "jet_de": de,
-            "degats": max(0, degats_calcules),
+            "degats": degats_finaux,
             "auto_degats": auto_degats,
             "resultat": resultat
         }
@@ -210,7 +128,7 @@ class MoteurReglesJDR:
         score_seduction = (initiateur.stats.charisme + initiateur.stats.stat_cosmetics) * (
             score_relation + initiateur.stats.chance + malus
         )
-        resultat = self.evaluer_jet(de + score_seduction, difficulte=20)
+        resultat = self.evaluer_jet(de + score_seduction, difficulte=20, jet_de=de)
         return {"jet_de": de, "score": score_seduction, "resultat": resultat}
 
     def calculer_vol(
@@ -224,7 +142,7 @@ class MoteurReglesJDR:
         """
         de = jet_de if jet_de is not None else random.randint(1, 20)
         score_vol = (voleur.stats.discretion + voleur.stats.dext) * (voleur.stats.chance + malus)
-        resultat = self.evaluer_jet(de + score_vol, difficulte=20)
+        resultat = self.evaluer_jet(de + score_vol, difficulte=20, jet_de=de)
         return {"jet_de": de, "score": score_vol, "resultat": resultat}
 
     def calculer_alteration_mentale(
@@ -241,7 +159,7 @@ class MoteurReglesJDR:
         score_alt = (lanceur.stats.force_mentale + chance1) * (
             lanceur.stats.stat_magie_potion + chance2 + lanceur.stats.dext
         )
-        resultat = self.evaluer_jet(de + score_alt, difficulte=25)
+        resultat = self.evaluer_jet(de + score_alt, difficulte=25, jet_de=de)
         return {"jet_de": de, "score": score_alt, "resultat": resultat}
     def detecter_cible(self, action_texte: str, personnages_presents: List[Personnage], joueur: Personnage) -> Personnage:
         """Identifie le PNJ mentionné dans la phrase du joueur (ou prend un PNJ présent par défaut)."""
@@ -255,7 +173,7 @@ class MoteurReglesJDR:
                 if len(partie_nom) > 2 and partie_nom in action_lower:
                     return pnj
 
-        return pnjs.pop(0) if pnjs else joueur
+        return pnjs[0] if pnjs else joueur
 
     def analyser_et_resoudre_action_libre(
         self,
@@ -278,8 +196,11 @@ class MoteurReglesJDR:
 
         cible = self.detecter_cible(action_texte, personnages_presents, joueur)
 
-        # 1. Détection d'une attaque ou d'un assassinat
-        mots_combat = ["attaque", "frappe", "tue", "assassine", "poignarde", "égorge", "blesse", "combats", "tire"]
+        # 1. Détection d'une attaque, d'un coup ou d'une mise en garde armée
+        mots_combat = [
+            "attaque", "frappe", "tue", "assassine", "poignarde", "égorge",
+            "blesse", "combats", "tire", "coup", "épée", "lame", "garde"
+        ]
         if any(mot in action_lower for mot in mots_combat):
             cote = "face"
             if "droite" in action_lower or "droit" in action_lower:
@@ -307,7 +228,7 @@ class MoteurReglesJDR:
 
             return {
                 "avec_consequence": True,
-                "type_action": f"Combat / Assassinat sur {cible.nom} (angle: {cote})",
+                "type_action": f"Combat / Action armée sur {cible.nom} (angle: {cote})",
                 "verdict": (
                     f"Cible: {cible.nom} | Jet de dé: {res['jet_de']} | "
                     f"Dégâts: {res['degats']} -> {res['resultat'].value}{info_furtivite}"
@@ -327,9 +248,8 @@ class MoteurReglesJDR:
                 )
             }
 
-        # 3. Détection d'un sort / potion / altération mentale
-        mots_magie = ["sort", "magie", "hypnotise", "charme", "potion", "ensorcelle", "manipule"]
-        if any(mot in action_lower for mot in mots_magie):
+        # 3. Détection d'un sortilège / potion / altération mentale
+        if re.search(r"\b(sortilège|magie|hypnotise|charme|potion|ensorcelle|manipule)\b", action_lower):
             res = self.calculer_alteration_mentale(joueur, chance1=joueur.stats.chance, chance2=1)
             return {
                 "avec_consequence": True,
@@ -340,7 +260,7 @@ class MoteurReglesJDR:
                 )
             }
 
-        # 4. Par défaut (parler, négocier, convaincre, interagir socialement)
+        # 4. Par défaut (parler, hurler, négocier, convaincre, interagir socialement)
         res = self.calculer_seduction(joueur, cible)
         return {
             "avec_consequence": True,
