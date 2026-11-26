@@ -1,50 +1,87 @@
-import json
 import os
+from pathlib import Path
 from src.models import Scene, Personnage, Stats, Relations
 from src.rules_engine import MoteurReglesJDR
 from src.llm import ILLMProvider, OllamaProvider, OpenRouterProvider
 
 TAILLE_CONTEXTE = 2048  # Fenêtre de contexte maîtrisée (num_ctx)
+DOSSIER_RACINE = Path(__file__).resolve().parent
 
 
-def charger_secrets() -> dict:
-    """Charge la configuration locale (clé OpenRouter, IP Jetson) depuis secrets.json."""
-    if os.path.exists("secrets.json"):
-        with open("secrets.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+def charger_env(filepath: Path = DOSSIER_RACINE / ".env") -> list[str]:
+    """Charge les variables du fichier .env situé à la racine du projet."""
+    cles_chargees: list[str] = []
+    if not filepath.exists():
+        return cles_chargees
+    with open(filepath, "r", encoding="utf-8") as f:
+        for ligne in f:
+            ligne = ligne.strip()
+            if not ligne or ligne.startswith("#") or "=" not in ligne:
+                continue
+            cle, valeur = ligne.split("=", 1)
+            cle_propre = cle.strip()
+            valeur_propre = valeur.strip().strip('"').strip("'")
+            os.environ[cle_propre] = valeur_propre
+            cles_chargees.append(cle_propre)
+    return cles_chargees
+
+
+def obtenir_url_jetson(cles_env: list[str]) -> str:
+    """Récupère l'URL du Jetson Nano depuis le .env (URL complète ou IP seule)."""
+    url = os.getenv("OLLAMA_JETSON_URL") or os.getenv("JETSON_URL")
+    if url:
+        return url.strip()
+
+    ip = (os.getenv("JETSON_IP") or os.getenv("IP_JETSON") or "").strip()
+    port = (os.getenv("JETSON_PORT") or os.getenv("PORT_JETSON") or "2020").strip()
+    if ip:
+        if ip.startswith("http"):
+            return ip
+        return f"http://{ip}:{port}"
+
+    raise ValueError(
+        f"Configuration Jetson manquante dans {DOSSIER_RACINE / '.env'}.\n"
+        f"Clés actuellement détectées dans votre .env : {cles_env}\n"
+        "Ajoutez OLLAMA_JETSON_URL=http://VOTRE_IP:2020 (ou JETSON_IP=VOTRE_IP) dans votre .env."
+    )
 
 
 def choisir_fournisseur_ia() -> ILLMProvider:
     """
-    Permet à l'utilisateur de basculer entre confidentialité locale/LAN et API distante.
-    Respecte le principe de Substitution de Liskov (LSP) via ILLMProvider.
+    Permet à l'utilisateur de basculer entre confidentialité locale/LAN et API distante
+    en utilisant exclusivement les paramètres du fichier .env.
     """
-    secrets = charger_secrets()
+    cles_env = charger_env()
+
     print("\n" + "-" * 65)
     print("   PARAMÈTRE DE CONFIDENTIALITÉ & FOURNISSEUR D'INFÉRENCE IA")
     print("-" * 65)
-    print("  [1] Ollama Local (PC : http://localhost:11434) — 100% Privé")
-    print("  [2] Ollama LAN   (Jetson Nano : port 2020)     — 100% Privé")
-    print("  [3] OpenRouter   (API Cloud)                   — Haute vitesse")
+    print("  Ollama Local (PC)          — 100% Privé")
+    print("  Ollama LAN   (Jetson Nano) — 100% Privé")
+    print("  OpenRouter   (API Cloud)   — Haute vitesse")
     
     choix = input("\nSélectionnez le moteur IA [1/2/3] (Entrée pour 1) : ").strip() or "1"
 
     if choix == "2":
-        ip_jetson = secrets.get("jetson_ip") or input("IP statique du Jetson Nano (ex: 192.168.1.45) : ").strip()
-        modele = input("Modèle sur Jetson (Entrée pour 'qwen2.5:1.5b') : ").strip() or "qwen2.5:1.5b"
-        return OllamaProvider(base_url=f"http://{ip_jetson}:2020", modele=modele)
+        url_jetson = obtenir_url_jetson(cles_env)
+        modele_jetson = os.getenv("OLLAMA_JETSON_MODEL") or os.getenv("OLLAMA_MODEL") or "qwen2.5:1.5b"
+        print(f"-> Connexion au Jetson sur : {url_jetson} ({modele_jetson})")
+        return OllamaProvider(base_url=url_jetson, modele=modele_jetson)
 
     elif choix == "3":
-        api_key = secrets.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY")
+        api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
-            api_key = input("Entrez votre clé API OpenRouter (sk-or-...) : ").strip()
-        modele = input("Modèle OpenRouter (Entrée pour 'qwen/qwen-2.5-7b-instruct:free') : ").strip() or "qwen/qwen-2.5-7b-instruct:free"
-        return OpenRouterProvider(api_key=api_key, modele=modele)
+            raise ValueError(f"Clé OPENROUTER_API_KEY manquante dans {DOSSIER_RACINE / '.env'}.")
+        modele_impose = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.2-3b-instruct:free")
+        print(f"-> Modèle OpenRouter imposé : {modele_impose}")
+        return OpenRouterProvider(api_key=api_key, modele=modele_impose)
 
-    # Par défaut : Ollama sur la machine locale
-    modele_local = input("Modèle Ollama local (Entrée pour 'qwen2.5:1.5b') : ").strip() or "qwen2.5:1.5b"
-    return OllamaProvider(base_url="http://localhost:11434", modele=modele_local)
+    url_locale = os.getenv("OLLAMA_LOCAL_URL")
+    modele_local = os.getenv("OLLAMA_LOCAL_MODEL") or os.getenv("OLLAMA_MODEL") or "qwen2.5:1.5b"
+    if not url_locale:
+        raise ValueError(f"Variable OLLAMA_LOCAL_URL manquante dans {DOSSIER_RACINE / '.env'}.")
+    print(f"-> Connexion locale sur : {url_locale} ({modele_local})")
+    return OllamaProvider(base_url=url_locale, modele=modele_local)
 
 
 def initialiser_scenario() -> dict[str, Scene]:
@@ -106,7 +143,6 @@ def lancer_cli():
     print("   MOTEUR NARRATIF JDR — CLI SOLID (LOCAL / JETSON / OPENROUTER)")
     print("=" * 65)
 
-    # Choix initial du fournisseur IA
     provider: ILLMProvider = choisir_fournisseur_ia()
 
     while True:
@@ -118,10 +154,10 @@ def lancer_cli():
         print("-" * 65)
 
         print("\nActions disponibles :")
-        print("  [1] Scruter la pièce (Action neutre)")
-        print("  [2] Attaquer Vesper sur son côté droit (Action avec conséquence)")
-        print("  [3] Changer de scène -> Aller aux Cachots (Découpage contexte)")
-        print("  [4] Changer de fournisseur IA (Switch Confidentialité / API)")
+        print("   1.Scruter la pièce (Action neutre)")
+        print("   2.Attaquer Vesper sur son côté droit (Action avec conséquence)")
+        print("   3.Changer de scène -> Aller aux Cachots (Découpage contexte)")
+        print("   4.Changer de fournisseur IA (Switch Confidentialité / API)")
         print("  [q] Quitter")
 
         choix = input("\nVotre choix (ou tapez une action libre) : ").strip()
@@ -147,15 +183,14 @@ def lancer_cli():
         else:
             action_texte = choix
 
-        # 1. Filtrage de l'action par le moteur
         avec_consequence = moteur.est_action_avec_consequence(action_texte)
         print(f"\n[ANALYSE MOTEUR] Action avec conséquence sur l'intrigue : {'OUI' if avec_consequence else 'NON (Observation)'}")
 
         verdict_regles = "Aucune mécanique requise (description simple)."
 
-        # 2. Résolution JDR si conséquence
         if avec_consequence:
-            joueur = scene_courante.personnages_presents[0]
+            joueur = scene_courante.personnages_presents.pop(0)
+            scene_courante.personnages_presents.insert(0, joueur)
             cible = scene_courante.personnages_presents[-1]
             res = moteur.calculer_degats(joueur, cible, cote_attaque="droite")
             verdict_regles = (
@@ -164,12 +199,11 @@ def lancer_cli():
             )
             print(f"[RÈGLES JDR]     {verdict_regles}")
 
-        # 3. Appel au fournisseur IA actif (Ollama PC, Jetson LAN ou OpenRouter)
         prompt_final = (
             f"{contexte_compresse}\n"
             f"ACTION JOUEUR: {action_texte}\n"
             f"VERDICT MOTEUR: {verdict_regles}\n"
-            f"Consigne: Décris la suite en 2 phrases maximum."
+            f"Consigne : Décris la suite uniquement en français en 2 phrases maximum."
         )
 
         print(f"\n[INFÉRENCE IA]   Envoi vers le fournisseur actif (num_ctx: {TAILLE_CONTEXTE})...")
@@ -180,10 +214,17 @@ def lancer_cli():
                 f"Vitesse: {reponse_ia['tokens_par_sec']} tokens/s "
                 f"({reponse_ia['tokens_generes']} tokens en {reponse_ia['duree_sec']}s)"
             )
-            print(f"\n[NARRATEUR IA]   « {reponse_ia['texte']} »\n")
+            print(f"\n[NARRATEUR IA]   « {reponse_ia['texte']} »")
+
+            donnees_json = reponse_ia.get("donnees_json", {})
+            nouveau_resume = donnees_json.get("nouveau_resume_telegraphique")
+            if nouveau_resume:
+                scene_courante.resume_telegraphique = nouveau_resume
+                print(f"[MÉMOIRE JSON]   Résumé télégraphique mis à jour : {nouveau_resume}\n")
+
         except Exception as err:
             print(f"\n[ERREUR IA]      {err}")
-            print("                 Utilisez l'option [4] pour basculer sur un autre fournisseur.\n")
+            print("                 Utilisez l'option pour basculer sur un autre fournisseur.\n")
 
         print("=" * 65)
 

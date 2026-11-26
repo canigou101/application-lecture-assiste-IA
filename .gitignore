@@ -5,10 +5,7 @@ __pycache__/
 *$py.class
 
 # Environnements virtuels
-venv/
-.venv/
-env/
-.env
+*.env
 # Fichiers temporaires et tests
 .pytest_cache/
 .coverage
