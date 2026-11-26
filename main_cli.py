@@ -41,25 +41,21 @@ def obtenir_url_jetson(cles_env: list[str]) -> str:
 
     raise ValueError(
         f"Configuration Jetson manquante dans {DOSSIER_RACINE / '.env'}.\n"
-        f"Clés actuellement détectées dans votre .env : {cles_env}\n"
-        "Ajoutez OLLAMA_JETSON_URL=http://VOTRE_IP:2020 (ou JETSON_IP=VOTRE_IP) dans votre .env."
+        f"Clés actuellement détectées dans votre .env : {cles_env}"
     )
 
 
 def choisir_fournisseur_ia() -> ILLMProvider:
-    """
-    Permet à l'utilisateur de basculer entre confidentialité locale/LAN et API distante
-    en utilisant exclusivement les paramètres du fichier .env.
-    """
+    """Sélectionne le fournisseur IA en lisant directement le fichier .env."""
     cles_env = charger_env()
 
     print("\n" + "-" * 65)
     print("   PARAMÈTRE DE CONFIDENTIALITÉ & FOURNISSEUR D'INFÉRENCE IA")
     print("-" * 65)
-    print("  Ollama Local (PC)          — 100% Privé")
-    print("  Ollama LAN   (Jetson Nano) — 100% Privé")
-    print("  OpenRouter   (API Cloud)   — Haute vitesse")
-    
+    print("  [1] Ollama Local (PC)          — 100% Privé")
+    print("  [2] Ollama LAN   (Jetson Nano) — 100% Privé")
+    print("  [3] OpenRouter   (API Cloud)   — Haute vitesse")
+
     choix = input("\nSélectionnez le moteur IA [1/2/3] (Entrée pour 1) : ").strip() or "1"
 
     if choix == "2":
@@ -85,13 +81,13 @@ def choisir_fournisseur_ia() -> ILLMProvider:
 
 
 def initialiser_scenario() -> dict[str, Scene]:
-    """Crée deux scènes distinctes pour démontrer le découpage et la compression de contexte."""
+    """Crée les scènes de départ pour la narration libre."""
     joueur = Personnage(
         id="p_joueur",
         nom="Arthur",
         est_joueur=True,
         caractere="gentil",
-        stats=Stats(force=5, dext=4, charisme=6, force_mentale=5, discretion=3, chance=2, stat_arme=3),
+        stats=Stats(force=5, dext=4, charisme=6, force_mentale=5, discretion=6, chance=2, stat_arme=3, stat_cosmetics=2),
         relations=Relations(allies=["pnj_roi"], ennemis=["pnj_assassin"])
     )
 
@@ -115,7 +111,7 @@ def initialiser_scenario() -> dict[str, Scene]:
         relations=Relations(allies=[], ennemis=["pnj_roi"])
     )
 
-    scene_1 = Scene(
+    scene_bal = Scene(
         scene_id="scene_01_bal",
         lieu="Salle de bal royale",
         niveau_danger=2,
@@ -123,24 +119,22 @@ def initialiser_scenario() -> dict[str, Scene]:
         personnages_presents=[joueur, roi, assassin]
     )
 
-    scene_2 = Scene(
+    scene_cachots = Scene(
         scene_id="scene_02_cachots",
         lieu="Cachots du château",
         niveau_danger=6,
-        resume_telegraphique="Arthur a poursuivi Vesper dans les sous-sols sombres après la tentative d'empoisonnement.",
+        resume_telegraphique="Sous-sols sombres du château où Vesper tente de fuir.",
         personnages_presents=[joueur, assassin]
     )
 
-    return {"1": scene_1, "2": scene_2}
-
-
+    return {"bal": scene_bal, "cachots": scene_cachots}
 def lancer_cli():
     moteur = MoteurReglesJDR()
     scenes = initialiser_scenario()
-    scene_courante = scenes["1"]
+    scene_courante = scenes["bal"]
 
     print("=" * 65)
-    print("   MOTEUR NARRATIF JDR — CLI SOLID (LOCAL / JETSON / OPENROUTER)")
+    print("   MOTEUR NARRATIF JDR — MODE LIBRE & RÈGLES DYNAMIQUES")
     print("=" * 65)
 
     provider: ILLMProvider = choisir_fournisseur_ia()
@@ -152,58 +146,48 @@ def lancer_cli():
         print("CONTEXTE COMPRESSÉ ENVOYÉ AU LLM (Économie de tokens) :")
         print(contexte_compresse)
         print("-" * 65)
+        print("Commandes système : /scene (changer de lieu) | /ia (changer d'IA) | /quit")
 
-        print("\nActions disponibles :")
-        print("   1.Scruter la pièce (Action neutre)")
-        print("   2.Attaquer Vesper sur son côté droit (Action avec conséquence)")
-        print("   3.Changer de scène -> Aller aux Cachots (Découpage contexte)")
-        print("   4.Changer de fournisseur IA (Switch Confidentialité / API)")
-        print("  [q] Quitter")
+        action_texte = input("\nQue fait Arthur ? > ").strip()
 
-        choix = input("\nVotre choix (ou tapez une action libre) : ").strip()
+        if not action_texte:
+            continue
 
-        if choix.lower() == "q":
+        if action_texte.lower() in ["/quit", "/q", "quitter"]:
             print("\nArrêt du moteur narratif.")
             break
 
-        elif choix == "3":
-            scene_courante = scenes["2"]
-            print("\n>>> TRANSITION DE SCÈNE : Le Roi Aldric est retiré du contexte JSON.")
-            continue
-
-        elif choix == "4":
+        if action_texte.lower() == "/ia":
             provider = choisir_fournisseur_ia()
-            print("\n>>> FOURNISSEUR IA MIS À JOUR (État de la scène conservé).")
+            print("\n>>> FOURNISSEUR IA MIS À JOUR.")
             continue
 
-        elif choix == "1":
-            action_texte = "Je scrute la pièce avec attention."
-        elif choix == "2":
-            action_texte = "J'attaque Vesper sur sa droite !"
-        else:
-            action_texte = choix
+        if action_texte.lower() == "/scene" or "cachot" in action_texte.lower():
+            if scene_courante.scene_id == "scene_01_bal":
+                scene_courante = scenes["cachots"]
+                print("\n>>> TRANSITION DE SCÈNE : Arrivée aux Cachots (Roi Aldric retiré du contexte).")
+            else:
+                scene_courante = scenes["bal"]
+                print("\n>>> TRANSITION DE SCÈNE : Retour dans la Salle de bal royale.")
+            if action_texte.lower() == "/scene":
+                continue
 
-        avec_consequence = moteur.est_action_avec_consequence(action_texte)
-        print(f"\n[ANALYSE MOTEUR] Action avec conséquence sur l'intrigue : {'OUI' if avec_consequence else 'NON (Observation)'}")
+        # Analyse dynamique de l'action libre du joueur
+        joueur = next((p for p in scene_courante.personnages_presents if p.est_joueur), scene_courante.personnages_presents.pop(0))
+        analyse = moteur.analyser_et_resoudre_action_libre(
+            action_texte=action_texte,
+            joueur=joueur,
+            personnages_presents=scene_courante.personnages_presents
+        )
 
-        verdict_regles = "Aucune mécanique requise (description simple)."
-
-        if avec_consequence:
-            joueur = scene_courante.personnages_presents.pop(0)
-            scene_courante.personnages_presents.insert(0, joueur)
-            cible = scene_courante.personnages_presents[-1]
-            res = moteur.calculer_degats(joueur, cible, cote_attaque="droite")
-            verdict_regles = (
-                f"Jet de dé: {res['jet_de']} | Dégâts infligés: {res['degats']} "
-                f"(Bonus angle mort borgne appliqué) -> {res['resultat'].value}"
-            )
-            print(f"[RÈGLES JDR]     {verdict_regles}")
+        print(f"\n[ANALYSE MOTEUR] {analyse['type_action']} (Conséquence : {'OUI' if analyse['avec_consequence'] else 'NON'})")
+        print(f"[RÈGLES JDR]     {analyse['verdict']}")
 
         prompt_final = (
             f"{contexte_compresse}\n"
-            f"ACTION JOUEUR: {action_texte}\n"
-            f"VERDICT MOTEUR: {verdict_regles}\n"
-            f"Consigne : Décris la suite uniquement en français en 2 phrases maximum."
+            f"ACTION LIBRE DU JOUEUR ({joueur.nom}) : {action_texte}\n"
+            f"VERDICT DU MOTEUR DE RÈGLES : {analyse['verdict']}\n"
+            f"Consigne : Raconte la suite de la scène en français en 2 phrases maximum en respectant strictement le verdict."
         )
 
         print(f"\n[INFÉRENCE IA]   Envoi vers le fournisseur actif (num_ctx: {TAILLE_CONTEXTE})...")
@@ -224,7 +208,7 @@ def lancer_cli():
 
         except Exception as err:
             print(f"\n[ERREUR IA]      {err}")
-            print("                 Utilisez l'option pour basculer sur un autre fournisseur.\n")
+            print("                 Tapez /ia pour basculer sur un autre fournisseur.\n")
 
         print("=" * 65)
 
